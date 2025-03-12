@@ -17,7 +17,7 @@
 		UserGroup,DeviceGroup
 
 	.EXAMPLE
-		".\translate_User_to_Device_Group.ps1"
+		".\EntraID_translate_User_to_Device_Group.ps1"
 #>
 
 #parameter
