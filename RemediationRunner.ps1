@@ -1,8 +1,10 @@
 <#
 .SYNOPSIS
-    This script runs an intune remediation on a single device or to a list of devices provided as CSV file.
+    This script runs an intune remediation on a single device, all devices or to a list of devices provided as CSV file.
 
 .CHANGES
+    Version 1.1 (2025-06-10):
+    - added switch for -allDevices
     Version 1.0 (2025-06-10):
     - Initial release
     - Basic functionality to run remediation on a specific device
@@ -11,6 +13,7 @@
 
 .DESCRIPTION
     The scipt prompts the user for an devicename if no csv file is specified with the parameter -csvPath.
+    If the switch -allDevices is used the parameter -csvPath will be ignored and the remediation will be run on all windows devices.
     If the parameter -csvPath is used the script will check if the path is valid and if the CSV Header is "DeviceName".
     After that the script connects to the GraphAPI and lists all remediation scripts in an Out-GridView.
     There you have to select the remediation you like to run on the target device(s).
@@ -25,8 +28,8 @@
 
 .AUTHOR
 
-    Original script by Cedric Ulrich https://github.com/ceulrich
-    Version        : 1.0
+    Original script by Cedric Ulrich
+    Version        : 1.1
     Creation Date  : 2025-06-10
     Last Modified  : 2025-06-10
 
@@ -36,18 +39,27 @@
 
     For single device use:
     PS .\RemediationRunner.ps1
+
+    For all deices use:
+    PS .\RemediationRunner.ps1 -allDevices
 #>
 
 [CmdletBinding()]
 param (
     [Parameter()]
     [string]
-    $csvPath
+    $csvPath,
+    [switch]
+    $allDevices
 )
 
-if ($csvPath) {
-    #Validate CSV path
 
+if ($allDevices){
+    #get all deviceNames
+    $deviceNames = Get-MgDeviceManagementManagedDevice -All -Filter "operatingSystem eq 'Windows'" | Select-Object -ExpandProperty DeviceName
+}
+elseif($csvPath) {
+    #Validate CSV path
     if(-not(Test-Path $csvPath))
     {
         Write-Host "Error: The specified CSV file was not found." -ForegroundColor Red
@@ -66,9 +78,11 @@ if ($csvPath) {
         Write-Host "..."
 
     }
+    #read CSV
     $deviceNames = Import-Csv -Path $csvPath
 }
 else {
+    #promt for deviceName
     $deviceNames = Read-Host "Enter the Devicename"
 }
 
@@ -79,7 +93,7 @@ $remediationScripts = $response.value | Select-Object @{Name="DisplayName";Expre
                                                 @{Name="Description";Expression={$_.description}}, 
                                                 @{Name="Created Date";Expression={$_.createdDateTime}}
 
-$selectedScripts = $remediationScripts | Out-GridView -Title "Select a Remediation Script" -OutputMode Single #-PassThru -OutputMode Single
+$selectedScripts = $remediationScripts | Out-GridView -Title "Select a Remediation Script" -OutputMode Single #-PassThru
 foreach ($selectedScript in $selectedScripts)
 {
     foreach ($deviceName in $deviceNames)
