@@ -1,8 +1,10 @@
 <#
 .SYNOPSIS
-    This script runs an intune remediation on a single device, all devices or to a list of devices provided as CSV file.
+    Runs an Intune remediation script on one or more Windows devices.
 
 .CHANGES
+    Version 1.2 (2025-06-16):
+    - Added parameter -entraIdGroupName to target devices from an Entra ID group
     Version 1.1 (2025-06-10):
     - added switch for -allDevices
     Version 1.0 (2025-06-10):
@@ -12,36 +14,57 @@
     - Select target remediation script from Out-Grid
 
 .DESCRIPTION
-    The scipt prompts the user for an devicename if no csv file is specified with the parameter -csvPath.
-    If the switch -allDevices is used the parameter -csvPath will be ignored and the remediation will be run on all windows devices.
-    If the parameter -csvPath is used the script will check if the path is valid and if the CSV Header is "DeviceName".
-    After that the script connects to the GraphAPI and lists all remediation scripts in an Out-GridView.
-    There you have to select the remediation you like to run on the target device(s).
+    This script allows you to trigger an Intune remediation (Proactive Remediation) on:
+    - A single device (prompted by name)
+    - All Windows devices in Intune
+    - A list of devices provided via a CSV file
+    - All devices that are members of a specified Entra ID group
+
+    The script connects to Microsoft Graph, lists available remediation scripts for selection, and then triggers the selected remediation on the target device(s).
+
+.PARAMETER csvPath
+    Path to a CSV file containing device names. The CSV must have a header "DeviceName" and one device name per row.
+    Example:
+        DeviceName
+        Device1
+        Device2
+
+.PARAMETER allDevices
+    If specified, the script will run the remediation on all Windows devices in Intune. This overrides the csvPath or entraIdGroupName parameter.
+
+.PARAMETER entraIdGroupName
+    If specified, the script will run the remediation on all devices that are members of the given Entra ID (Azure AD) group.
+    The group should contain device objects. This overrides the csvPath parameter if both are provided.
 
 .NOTES
-    - Ensure that you have the Microsoft.Graph module installed before running this script.
-    - The following GraphAPI rights are necessary:
+    Requirements:
+    - Microsoft.Graph PowerShell module must be installed.
+    - The following Graph API permissions are required:
         - DeviceManagementConfiguration.ReadWrite.All
         - DeviceManagementScripts.Read.All
         - DeviceManagementManagedDevices.PrivilegedOperations.All
         - DeviceManagementManagedDevices.ReadWrite.All
 
-.AUTHOR
-
-    Original script by Cedric Ulrich
-    Version        : 1.1
-    Creation Date  : 2025-06-10
-    Last Modified  : 2025-06-10
+    Author: Cedric Ulrich
+    Version: 1.2
+    Creation Date: 2025-06-10
+    Last Modified: 2025-06-16
 
 .EXAMPLE
-    For CSV input use:
     PS .\RemediationRunner.ps1 -csvPath .\devices.csv
+    Runs the selected remediation on all devices listed in devices.csv.
 
-    For single device use:
+.EXAMPLE
     PS .\RemediationRunner.ps1
+    Prompts for a device name and runs the selected remediation on that device.
 
-    For all deices use:
+.EXAMPLE
     PS .\RemediationRunner.ps1 -allDevices
+    Runs the selected remediation on all Windows devices in Intune.
+
+.EXAMPLE
+    PS .\RemediationRunner.ps1 -entraIdGroupName "My Device Group"
+    Runs the selected remediation on all devices in the specified Entra ID group.
 #>
 
 [CmdletBinding()]
@@ -50,13 +73,29 @@ param (
     [string]
     $csvPath,
     [switch]
-    $allDevices
+    $allDevices,
+    [string]
+    $entraIdGroupName
 )
 
-
+Connect-MgGraph -NoWelcome
 if ($allDevices){
     #get all deviceNames
     $deviceNames = Get-MgDeviceManagementManagedDevice -All -Filter "operatingSystem eq 'Windows'" | Select-Object -ExpandProperty DeviceName
+}
+elseif ($entraIdGroupName) {
+    $deviceNames = @()
+    $groupMembers = Get-MgGroupMember -GroupId (Get-MgGroup -Filter "displayName eq '$entraIdGroupName'").Id -All
+    foreach ($groupMember in $groupMembers) {
+        $deviceName = Get-MgDevice -DeviceId $($groupMember.Id) | Select-Object -ExpandProperty DisplayName
+        if ($deviceName -eq $null) {
+            Write-Host "$($groupMember.Id) is not a device." -ForegroundColor Red
+        }
+        else {
+            $deviceNames += $deviceName
+        }
+    }
+    Write-Host $deviceNames.Count 
 }
 elseif($csvPath) {
     #Validate CSV path
@@ -86,7 +125,7 @@ else {
     $deviceNames = Read-Host "Enter the Devicename"
 }
 
-Connect-MgGraph -NoWelcome
+
 $response  = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts" -Method GET
 $remediationScripts = $response.value | Select-Object @{Name="DisplayName";Expression={$_.displayName}},
                                                 @{Name="ID";Expression={$_.id}}, 
